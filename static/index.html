@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>N2S Eval Workbench</title>
+  <style>
+    :root {
+      --bg: #0f1419; --paper: #1a222c; --ink: #e8eef4; --muted: #8b9aab;
+      --line: #2a3542; --accent: #5b9fd4; --ok: #3dbf7a; --bad: #e05555; --warn: #d4a017;
+      --mono: "IBM Plex Mono", ui-monospace, monospace;
+      --sans: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 var(--sans); }
+    header { padding: 16px 20px; border-bottom: 1px solid var(--line); background: var(--paper); }
+    header h1 { margin: 0 0 4px; font-size: 20px; font-weight: 650; }
+    header p { margin: 0; color: var(--muted); font-size: 13px; }
+    header a { color: var(--accent); }
+    .layout { display: grid; grid-template-columns: 1fr 1.1fr; gap: 0; min-height: calc(100vh - 90px); }
+    @media (max-width: 960px) { .layout { grid-template-columns: 1fr; } }
+    .panel { padding: 16px 18px 28px; }
+    .panel.left { border-right: 1px solid var(--line); }
+    label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 12px 0 6px; }
+    select, textarea, input[type="text"] {
+      width: 100%; background: #121820; color: var(--ink); border: 1px solid var(--line);
+      border-radius: 4px; padding: 10px; font: inherit;
+    }
+    textarea { min-height: 220px; resize: vertical; font-family: var(--sans); line-height: 1.5; }
+    .btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    button.action {
+      background: var(--accent); color: #0a0e14; border: 0; padding: 10px 16px;
+      border-radius: 4px; font: inherit; font-weight: 650; cursor: pointer;
+    }
+    button.action:disabled { opacity: 0.45; cursor: not-allowed; }
+    button.action.secondary { background: #243040; color: var(--ink); border: 1px solid var(--line); }
+    .card { background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; margin-bottom: 12px; }
+    .card h2 { margin: 0 0 10px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); }
+    .big { font-size: 22px; font-weight: 700; font-family: var(--mono); }
+    .ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); } .muted { color: var(--muted); }
+    .pill { display: inline-block; padding: 3px 8px; border-radius: 3px; border: 1px solid var(--line); font-size: 12px; font-weight: 650; margin-right: 6px; }
+    .pill.auto { border-color: var(--ok); color: var(--ok); }
+    .pill.review { border-color: var(--warn); color: var(--warn); }
+    pre { margin: 0; white-space: pre-wrap; font-family: var(--mono); font-size: 12px; color: var(--muted); max-height: 220px; overflow: auto; }
+    .status { font-size: 13px; color: var(--muted); margin-top: 10px; }
+    .examples button {
+      display: block; width: 100%; text-align: left; background: #121820; border: 1px solid var(--line);
+      color: var(--ink); padding: 8px 10px; margin-bottom: 6px; border-radius: 4px; cursor: pointer; font: inherit; font-size: 13px;
+    }
+    .examples button:hover { border-color: var(--accent); }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    ul.reasons { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>N2S Eval Workbench</h1>
+    <p>
+      Paste a note → fast Track A evaluation (extract → ground → Dual → AUTO/REVIEW).
+      Deep dive expands forensics only when you ask.
+      · <a href="http://127.0.0.1:8253/">:8253 lab</a>
+      · <a href="http://127.0.0.1:8256/">:8256 RepEng</a>
+      · <a href="https://udonsikalu.github.io/cxr-evidence-grounding-lab/">Pages demo</a>
+    </p>
+  </header>
+  <div class="layout">
+    <div class="panel left">
+      <label>Model</label>
+      <select id="model"></select>
+      <label>Optional gold (for scoring)</label>
+      <select id="gold">
+        <option value="UNKNOWN">Unknown / not scoring</option>
+        <option value="SATISFIED">SATISFIED</option>
+        <option value="NOT_SATISFIED">NOT_SATISFIED</option>
+        <option value="UNCERTAIN">UNCERTAIN</option>
+        <option value="CONTRADICTION">CONTRADICTION</option>
+      </select>
+      <label>Clinical note</label>
+      <textarea id="note" placeholder="Paste a doctor’s note about first-line therapy failure…"></textarea>
+      <div class="btn-row">
+        <button class="action" id="btn-eval">Evaluate</button>
+        <button class="action secondary" id="btn-deep" disabled>Deep dive</button>
+        <button class="action secondary" id="btn-dl-json" disabled>Download JSON</button>
+        <button class="action secondary" id="btn-dl-txt" disabled>Download report</button>
+      </div>
+      <p class="status" id="status">Loading…</p>
+      <label>Example notes</label>
+      <div class="examples" id="examples"></div>
+      <div class="card" style="margin-top:14px">
+        <h2>Predicate</h2>
+        <p class="muted" id="predicate" style="margin:0;font-size:13px"></p>
+      </div>
+    </div>
+    <div class="panel" id="out">
+      <div class="card"><p class="muted">Results appear here after Evaluate.</p></div>
+    </div>
+  </div>
+<script>
+const $ = (id) => document.getElementById(id);
+let meta = null;
+let lastFast = null;
+let lastDeep = null;
+let pollTimer = null;
+
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function downloadBlob(filename, text, mime) {
+  const blob = new Blob([text], { type: mime || 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function deepReportText(rep) {
+  const parts = [];
+  parts.push(`N2S EVAL DEEP DIVE — ${rep.case_id || '?'}`);
+  parts.push(`model: ${rep.model || '?'}`);
+  parts.push(`timestamp: ${rep.timestamp || ''}`);
+  parts.push('');
+  parts.push('NARRATIVE');
+  parts.push('─'.repeat(44));
+  (rep.narrative || []).forEach(line => parts.push(`• ${line}`));
+  parts.push('');
+  const live = rep.forensics && rep.forensics.ok ? rep.forensics : null;
+  const ex = rep.forensics_example;
+  if (live && live.ascii) {
+    parts.push(live.ascii);
+    parts.push('');
+  } else if (ex && ex.ascii) {
+    parts.push('(EXAMPLE — frozen expand; not live note)');
+    parts.push(ex.ascii);
+    parts.push('');
+  } else if (rep.forensics && rep.forensics.message) {
+    parts.push('FORENSICS');
+    parts.push(String(rep.forensics.message));
+    parts.push('');
+  }
+  parts.push('ROUND-TRIP');
+  parts.push('─'.repeat(44));
+  parts.push(JSON.stringify(rep.roundtrip || {}, null, 2));
+  parts.push('');
+  parts.push('MISMATCH');
+  parts.push(JSON.stringify(rep.mismatch || {}, null, 2));
+  parts.push('');
+  parts.push(`artifact: ${rep.artifact || ''}`);
+  return parts.join('\n');
+}
+
+function enableDeepDownloads(rep) {
+  lastDeep = rep;
+  $('btn-dl-json').disabled = false;
+  $('btn-dl-txt').disabled = false;
+}
+
+async function init() {
+  meta = await fetch('/api/meta').then(r => r.json());
+  $('model').innerHTML = (meta.models || []).map(m =>
+    `<option value="${esc(m.id)}">${esc(m.label)}</option>`
+  ).join('');
+  const pref = (meta.models || []).find(m => m.id.includes('qwen2.5-coder')) || (meta.models || [])[0];
+  if (pref) $('model').value = pref.id;
+  $('predicate').textContent = meta.predicate_text || meta.predicate_id;
+  $('examples').innerHTML = (meta.examples || []).map(ex =>
+    `<button type="button" data-id="${esc(ex.id)}"><b>${esc(ex.id)}</b> — ${esc(ex.label)}</button>`
+  ).join('');
+  $('examples').querySelectorAll('button').forEach(btn => {
+    btn.onclick = () => {
+      const ex = meta.examples.find(e => e.id === btn.dataset.id);
+      if (!ex) return;
+      $('note').value = ex.evidence;
+      $('gold').value = ex.gold || 'UNKNOWN';
+    };
+  });
+  const oll = meta.ollama_reachable ? 'Ollama up' : 'Ollama down — use Mock';
+  $('status').textContent = `${oll} · port ${meta.port} · ${meta.capabilities?.note || ''}`;
+}
+
+function pathFieldDiff(r) {
+  const c = r.paths?.C_full || {};
+  const d = r.paths?.D_full || {};
+  const cg = c.grounding || {};
+  const dg = d.grounding || {};
+  const ce = c.extraction || {};
+  const de = d.extraction || {};
+  const rows = [];
+  const push = (label, a, b) => {
+    if (String(a) !== String(b)) rows.push({ label, c: a, d: b });
+  };
+  push('verdict', c.verdict, d.verdict);
+  for (const k of [
+    'first_line_identified',
+    'first_line_administered',
+    'failure_event',
+    'failure_of_first_line',
+    'contradiction',
+    'uncertainty',
+  ]) {
+    push(`ground.${k}`, cg[k], dg[k]);
+  }
+  push('extract.administration_status', ce.administration_status, de.administration_status);
+  push('extract.uncertainty_present', ce.uncertainty_present, de.uncertainty_present);
+  push('extract.uncertainty_why', ce.uncertainty_why, de.uncertainty_why);
+  return rows;
+}
+
+function renderFast(r) {
+  lastFast = r;
+  $('btn-deep').disabled = false;
+  const disp = r.disposition === 'REVIEW' ? 'review' : 'auto';
+  const mm = r.mismatch || {};
+  const mmCls = mm.agree === false ? 'bad' : mm.agree === true ? 'ok' : 'warn';
+  const reasons = (r.gates?.reasons || []).map(x => `<li>${esc(x)}</li>`).join('');
+  const mmReasons = (mm.reasons || []).map(x => `<li>${esc(x)}</li>`).join('');
+  const dualDisagree = r.paths?.Dual_full?.agreed === false
+    || r.paths?.Dual_full?.reason === 'paths_disagree'
+    || (r.paths?.C_full?.verdict && r.paths?.D_full?.verdict
+        && r.paths.C_full.verdict !== r.paths.D_full.verdict);
+  const diffs = dualDisagree ? pathFieldDiff(r) : [];
+  const diffHtml = diffs.length
+    ? `<div class="card">
+        <h2>Why REVIEW (C vs D)</h2>
+        <p class="warn" style="margin:0 0 8px">Paths disagree — Dual stays REVIEW until they align.</p>
+        <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px">
+          <tr style="color:var(--muted)"><th align="left">Field</th><th align="left">C</th><th align="left">D</th></tr>
+          ${diffs.map(x => `<tr><td>${esc(x.label)}</td><td>${esc(x.c)}</td><td>${esc(x.d)}</td></tr>`).join('')}
+        </table>
+      </div>`
+    : '';
+  $('out').innerHTML = `
+    <div class="card">
+      <h2>Result</h2>
+      <div><span class="pill ${disp}">${esc(r.disposition)}</span>
+        <span class="big">${esc(r.verdict)}</span></div>
+      <p class="muted" style="margin:8px 0 0">${esc(r.summary?.headline || '')}</p>
+      <p class="muted" style="margin:6px 0 0;font-size:12px;font-family:var(--mono)">
+        model ${esc(r.model)} · case ${esc(r.case_id)} · live ${r.live}
+      </p>
+    </div>
+    <div class="grid2">
+      <div class="card"><h2>C_full (note → structure)</h2>
+        <div class="big" style="font-size:16px">${esc(r.paths?.C_full?.verdict)}</div></div>
+      <div class="card"><h2>D_full (analysis → structure)</h2>
+        <div class="big" style="font-size:16px">${esc(r.paths?.D_full?.verdict)}</div></div>
+    </div>
+    <div class="card">
+      <h2>Dual_full</h2>
+      <div class="big" style="font-size:16px">${esc(r.paths?.Dual_full?.verdict)}</div>
+      <p class="muted" style="margin:6px 0 0;font-size:12px">${esc(r.paths?.Dual_full?.reason || r.paths?.Dual_full?.disposition || '')}</p>
+    </div>
+    ${diffHtml}
+    <div class="card">
+      <h2>N2S mismatch (extract X vs grounded X)</h2>
+      <p class="${mmCls}">
+        neural=${esc(mm.neural_contradiction)} · grounded=${esc(mm.grounded_X)} ·
+        ${mm.agree === false ? 'DISAGREE' : mm.agree === true ? 'agree' : 'uncertain'}
+      </p>
+      ${mmReasons ? `<ul class="reasons">${mmReasons}</ul>` : ''}
+      ${mm.grounding_trace?.length ? `<pre>${esc(mm.grounding_trace.join('\\n'))}</pre>` : ''}
+    </div>
+    <div class="card">
+      <h2>Gates / reasons</h2>
+      ${reasons ? `<ul class="reasons">${reasons}</ul>` : '<p class="ok">No gate failures</p>'}
+    </div>
+    <div class="card">
+      <h2>Grounding (C)</h2>
+      <pre>${esc(JSON.stringify(r.paths?.C_full?.grounding, null, 2))}</pre>
+    </div>
+    <div class="card">
+      <h2>Extraction (C)</h2>
+      <pre>${esc(JSON.stringify(r.paths?.C_full?.extraction, null, 2))}</pre>
+    </div>
+  `;
+}
+
+function renderForensicsBlock(title, f, isExample) {
+  if (!f) return '';
+  const rows = (f.layers || []).map(r => {
+    if (r.missing) {
+      return `<tr><td>L${r.layer}</td><td class="muted">—</td><td class="muted">—</td></tr>`;
+    }
+    const mark = r.primary ? ' ←' : '';
+    return `<tr class="${r.primary ? 'warn' : ''}"><td>L${r.layer}${mark}</td>
+      <td>${Number(r.temporal_change_score).toFixed(2)}</td>
+      <td>${Number(r.contradiction_score).toFixed(2)}</td></tr>`;
+  }).join('');
+  const mm = f.representation_commitment_mismatch;
+  const commit = String(f.final_commitment || '').toUpperCase();
+  const mmHtml = mm === true
+    ? '<p class="bad">⚠ REPRESENTATION–COMMITMENT MISMATCH</p>'
+    : (mm === false && commit === 'CONTRADICTION')
+      ? '<p class="ok">✓ representation and commitment agree (under this probe)</p>'
+      : '<p class="muted">Representation–commitment comparison: NOT EVALUATED — final commitment is outside the temporal-change/contradiction probe label space.</p>';
+  const     banner = isExample
+    ? '<p class="warn"><b>EXAMPLE only</b> — frozen expand TX_E01, <em>not</em> your pasted note. Live HF forensics needs free GPU (~14 GiB). Unload Ollama 32B / wait, then Deep dive again.</p>'
+    : (f.status === 'deferred_gpu_busy'
+      ? `<p class="warn">${esc(f.message || 'GPU busy')}</p>`
+      : '');
+  return `<div class="card">
+    <h2>${esc(title)}</h2>
+    ${banner}
+    <p class="muted" style="font-size:12px;margin:0 0 8px">${esc(f.method || '')}</p>
+    <div class="big" style="font-size:15px;margin-bottom:8px">Final commitment: ${esc(f.final_commitment || '—')}</div>
+    <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:13px">
+      <tr style="color:var(--muted)"><th align="left">Layer</th><th align="right">Temporal-change</th><th align="right">Contradiction</th></tr>
+      ${rows}
+    </table>
+    <p style="margin:12px 0 4px">L20 representation readout: <b>${esc(f.upstream_signal || '—')}</b></p>
+    ${mmHtml}
+    ${f.ascii ? `<pre style="margin-top:12px">${esc(f.ascii)}</pre>` : ''}
+    ${f.transfer_note ? `<p class="muted" style="font-size:11px;margin-top:8px">${esc(f.transfer_note)}</p>` : ''}
+  </div>`;
+}
+
+function renderDeep(rep) {
+  enableDeepDownloads(rep);
+  const narr = (rep.narrative || []).map(l => `<li>${esc(l)}</li>`).join('');
+  const liveF = rep.forensics && rep.forensics.ok ? rep.forensics : null;
+  const exF = rep.forensics_example || (!liveF && rep.forensics?.status === 'deferred_gpu_busy' ? rep.forensics_example : rep.forensics_example);
+  const deepCard = `
+    <div class="card">
+      <h2>Downloads</h2>
+      <p class="muted" style="margin:0 0 8px;font-size:13px">Save this deep dive to your machine.</p>
+      <div class="btn-row" style="margin-top:0">
+        <button class="action secondary" type="button" id="btn-dl-json-inline">Download JSON</button>
+        <button class="action secondary" type="button" id="btn-dl-txt-inline">Download report (.txt)</button>
+      </div>
+      <p class="muted" style="font-size:11px;margin-top:8px">Also saved on server: ${esc(rep.artifact || '')}</p>
+    </div>
+    ${liveF ? renderForensicsBlock('N2S forensics (live HF)', liveF, false) : ''}
+    ${exF ? renderForensicsBlock('N2S forensics (example)', exF, true) : ''}
+    ${!liveF && rep.forensics && !exF ? renderForensicsBlock('N2S forensics', rep.forensics, false) : ''}
+    <div class="card">
+      <h2>Deep dive · Track A</h2>
+      <ul class="reasons">${narr}</ul>
+      <p class="muted" style="margin-top:10px;font-size:12px">${esc(rep.mi_status?.reason || '')}</p>
+      <p class="muted" style="font-size:12px">${esc(rep.mi_status?.next || '')}</p>
+      <h2 style="margin-top:12px">Round-trip</h2>
+      <pre>${esc(JSON.stringify(rep.roundtrip, null, 2))}</pre>
+    </div>`;
+  $('out').insertAdjacentHTML('afterbegin', deepCard);
+  const dlJson = () => {
+    const id = (rep.case_id || 'deep').replace(/[^\w.-]+/g, '_');
+    downloadBlob(`n2s-deep-${id}.json`, JSON.stringify(rep, null, 2), 'application/json');
+  };
+  const dlTxt = () => {
+    const id = (rep.case_id || 'deep').replace(/[^\w.-]+/g, '_');
+    downloadBlob(`n2s-deep-${id}.txt`, deepReportText(rep), 'text/plain;charset=utf-8');
+  };
+  $('btn-dl-json-inline').onclick = dlJson;
+  $('btn-dl-txt-inline').onclick = dlTxt;
+}
+
+$('btn-eval').onclick = async () => {
+  $('btn-eval').disabled = true;
+  $('btn-deep').disabled = true;
+  $('status').textContent = 'Evaluating… (Ollama extract + Dual — may take ~30–90s)';
+  try {
+    const res = await fetch('/api/evaluate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        note: $('note').value,
+        model: $('model').value,
+        gold: $('gold').value,
+      }),
+    }).then(r => r.json());
+    if (res.error) throw new Error(res.error);
+    renderFast(res);
+    $('status').textContent = `Done · ${res.disposition} ${res.verdict}`;
+  } catch (e) {
+    $('status').innerHTML = `<span class="bad">${esc(e.message)}</span>`;
+  } finally {
+    $('btn-eval').disabled = false;
+  }
+};
+
+$('btn-deep').onclick = async () => {
+  if (!lastFast) return;
+  $('btn-deep').disabled = true;
+  $('status').textContent = 'Deep dive queued…';
+  const sub = await fetch('/api/deep-dive', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fast_result: lastFast }),
+  }).then(r => r.json());
+  if (!sub.ok) {
+    $('status').innerHTML = `<span class="bad">${esc(sub.error || 'failed')}</span>`;
+    $('btn-deep').disabled = false;
+    return;
+  }
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    const st = await fetch('/api/job').then(r => r.json());
+    $('status').textContent = `Deep dive · ${st.state} · ${st.step || ''}`;
+    if (st.state === 'done' && st.result) {
+      clearInterval(pollTimer);
+      renderDeep(st.result);
+      $('btn-deep').disabled = false;
+      $('status').textContent = 'Deep dive done';
+    }
+    if (st.state === 'error') {
+      clearInterval(pollTimer);
+      $('status').innerHTML = `<span class="bad">${esc(st.error)}</span>`;
+      $('btn-deep').disabled = false;
+    }
+  }, 1500);
+};
+
+init().catch(e => { $('status').textContent = 'Error: ' + e; });
+
+$('btn-dl-json').onclick = () => {
+  if (!lastDeep) return;
+  const id = (lastDeep.case_id || 'deep').replace(/[^\w.-]+/g, '_');
+  downloadBlob(`n2s-deep-${id}.json`, JSON.stringify(lastDeep, null, 2), 'application/json');
+};
+$('btn-dl-txt').onclick = () => {
+  if (!lastDeep) return;
+  const id = (lastDeep.case_id || 'deep').replace(/[^\w.-]+/g, '_');
+  downloadBlob(`n2s-deep-${id}.txt`, deepReportText(lastDeep), 'text/plain;charset=utf-8');
+};
+</script>
+</body>
+</html>
