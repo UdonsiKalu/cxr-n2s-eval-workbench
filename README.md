@@ -1,32 +1,24 @@
-# N2S Interactive Eval Workbench
+# N2S Eval Workbench
 
-Paste a clinical note → **fast Track A evaluation** (extract → ground → verify → Dual → AUTO/REVIEW).  
-Optional **Deep dive** expands round-trip forensics — not full HF MI on every note.
+Interactive Track A evaluation on port **8257**.
 
-**Port:** **8257**  
-**Companion lab:** clone/use sibling `../cxr-evidence-grounding-lab/`
+Sibling lab: `../cxr-evidence-grounding-lab` (`n2s_lab`, artifacts).
 
 ## Run
 
 ```bash
-# Needs Ollama for live models (or pick Mock in the UI)
 cd cxr-n2s-eval-workbench
-python3 server.py
-# → http://127.0.0.1:8257/
+python3 server.py   # http://127.0.0.1:8257/
 ```
 
-## What it does
+## Flow
 
-| Action | Path |
-|--------|------|
-| **Evaluate** | C_full + D_full + Dual_full + extract-vs-ground X mismatch → AUTO or REVIEW |
-| **Deep dive** | Round-trip + **N2S forensics** (HF layer scores: temporal-change vs contradiction). If GPU is busy (~15 GiB needed), shows a frozen **example** panel and defers live capture. |
+1. **Evaluate** — Ollama extract → ground → Dual → AUTO/REVIEW (then verified Ollama unload)
+2. **Deep dive** — round-trip + HF L20 forensics (when ~14 GiB free)
+3. **Intervene α** — HF 7B expand L20 steer: baseline + full_vector @ α (default **8**) + optional gaussian/reverse controls
 
-Forensics directions: `../cxr-evidence-grounding-lab/artifacts/n2s-forensics-directions-qwen7b.json` (L20 Class A/B from expand).
+Intervene uses the frozen expand direction (`n2s-forensics-directions-qwen7b.json`), **not** the Phase-10 BC_E* vector on `:8256`. Limited α=8 claim — partial editor, not family-wide.
 
-Predicate: first-line therapy failed (same as the evidence-grounding lab).
-
-## Related
+## Links
 
 - Lab UI `:8253` · RepEng Workbench `:8256`
-- Public demos: [grounding](https://udonsikalu.github.io/cxr-evidence-grounding-lab/) · [workbench](https://udonsikalu.github.io/cxr-repeng-workbench/)
