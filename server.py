@@ -74,6 +74,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return _json_response(self, api.evaluate_fast(body))
             if path == "/api/deep-dive":
                 return _json_response(self, api.submit_deep_dive(body))
+            if path == "/api/intervene":
+                return _json_response(self, api.submit_intervene(body))
             return _json_response(self, {"error": "not found"}, 404)
         except Exception as exc:  # noqa: BLE001
             return _json_response(
@@ -93,6 +95,7 @@ def main() -> None:
     print(f"N2S eval workbench  http://{HOST}:{args.port}/")
     print(f"  Fast path         POST /api/evaluate  (Track A Dual + mismatch)")
     print(f"  Deep dive         POST /api/deep-dive (round-trip forensics)")
+    print(f"  Intervene (α)     POST /api/intervene (HF L20 expand steer)")
     print(f"  Lab               {api.LAB_ROOT}")
     try:
         httpd.serve_forever()

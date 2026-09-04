@@ -110,14 +110,21 @@ def meta_payload() -> dict[str, Any]:
         "examples": EXAMPLE_NOTES,
         "capabilities": {
             "behavioral": True,
-            "activations": False,
+            "activations": True,
+            "intervene_alpha": True,
             "unload_ollama_after_run": True,
             "note": (
                 "Fast path = Track A (extract→ground→verify→Dual→AUTO/REVIEW). "
                 "After Evaluate/Deep dive, Ollama VRAM is freed (keep_alive=0) by default "
                 "and verified via /api/ps before returning. "
                 "Deep dive adds HF forensics when GPU free. "
+                "Intervene runs frozen expand L20 α-steer (baseline + full + controls). "
                 "Pass unload_after=false to keep the model warm."
+            ),
+            "intervene_default_alpha": 8.0,
+            "intervene_claim": (
+                "Expand L20 unit(mean_A−mean_B); limited α=8 partial editor "
+                "(not family-wide; not Ph10 BC_E* vector)."
             ),
         },
     }
@@ -653,6 +660,95 @@ def submit_deep_dive(body: dict[str, Any]) -> dict[str, Any]:
                 _job["error"] = str(exc)
                 _job["log"] = (_job.get("log") or []) + [traceback.format_exc()[-600:]]
             _log(f"deep dive ERROR: {exc}")
+
+    threading.Thread(target=worker, daemon=True).start()
+    return {"ok": True, "job_id": jid, "job": job_status()}
+
+
+def submit_intervene(body: dict[str, Any]) -> dict[str, Any]:
+    """Async α intervention on the current note (HF 7B, expand L20 direction)."""
+    note = (body.get("note") or "").strip()
+    if not note:
+        raise ValueError("note required")
+    case_id = (body.get("case_id") or f"LIVE_{uuid.uuid4().hex[:8]}").strip()
+    gold = (body.get("gold") or "").strip() or "UNKNOWN"
+    alpha = float(body.get("alpha") if body.get("alpha") is not None else 8.0)
+    include_controls = body.get("include_controls", True)
+    if isinstance(include_controls, str):
+        include_controls = include_controls.strip().lower() not in ("0", "false", "no")
+    parent_deep = body.get("parent_deep")
+
+    with _lock:
+        if _job["state"] in ("queued", "running"):
+            return {"ok": False, "error": "job already running", "job": job_status()}
+        jid = uuid.uuid4().hex[:8]
+        _job.update(
+            {
+                "id": jid,
+                "kind": "intervene",
+                "state": "queued",
+                "step": "queued",
+                "result": None,
+                "error": None,
+                "log": [],
+            }
+        )
+
+    def worker() -> None:
+        with _lock:
+            _job["state"] = "running"
+            _job["step"] = "unload ollama"
+        # Free Ollama if a Track A model is still parked.
+        try:
+            model = (body.get("model") or DEFAULT_MODEL)
+            if model and model != "mock":
+                freed = unload_model(model)
+                _log(
+                    f"pre-intervene ollama unload {model}: "
+                    f"ok={freed.get('ok')} verified={freed.get('verified')}"
+                )
+        except Exception as exc:  # noqa: BLE001
+            _log(f"pre-intervene ollama unload skipped: {exc}")
+
+        _job["step"] = f"HF intervene α={alpha}"
+        _log(f"intervene {jid} start α={alpha} controls={include_controls}")
+        try:
+            from n2s_lab.n2s_intervene import format_intervene_text, run_intervene_live
+
+            panel = run_intervene_live(
+                note,
+                case_id=case_id,
+                gold=gold,
+                alpha=alpha,
+                include_controls=include_controls,
+                unload_after=True,
+            )
+            if panel.get("ok"):
+                panel["ascii"] = format_intervene_text(panel)
+            report = {
+                "schema": "n2s_eval_intervene_v1",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "case_id": case_id,
+                "note": note,
+                "gold": gold,
+                "parent_deep": parent_deep,
+                "intervene": panel,
+            }
+            RUNS_DIR.mkdir(parents=True, exist_ok=True)
+            path = RUNS_DIR / f"intervene-{case_id}-{uuid.uuid4().hex[:6]}.json"
+            path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+            report["artifact"] = str(path)
+            with _lock:
+                _job["result"] = report
+                _job["state"] = "done"
+                _job["step"] = "done"
+            _log(f"intervene {jid} done → {path}")
+        except Exception as exc:  # noqa: BLE001
+            with _lock:
+                _job["state"] = "error"
+                _job["error"] = str(exc)
+                _job["log"] = (_job.get("log") or []) + [traceback.format_exc()[-600:]]
+            _log(f"intervene ERROR: {exc}")
 
     threading.Thread(target=worker, daemon=True).start()
     return {"ok": True, "job_id": jid, "job": job_status()}
