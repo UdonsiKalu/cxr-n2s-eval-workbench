@@ -1,0 +1,26 @@
+{
+  "EX_CONTRA": {
+    "id": "EX_CONTRA",
+    "label": "True contradiction — failed vs still responding",
+    "gold": "CONTRADICTION",
+    "evidence": "Note A: Patient failed first-line FOLFOX after four cycles. Addendum same day: Disease remains responsive to FOLFOX; continue current regimen."
+  },
+  "EX_PLANNED": {
+    "id": "EX_PLANNED",
+    "label": "Planned only — not yet given",
+    "gold": "NOT_SATISFIED",
+    "evidence": "Newly diagnosed metastatic colon cancer. Multidisciplinary plan is to start first-line FOLFOX next week. No systemic therapy has been administered yet."
+  },
+  "EX_BC_E1": {
+    "id": "EX_BC_E1",
+    "label": "BC_E1-style — response then later failure",
+    "gold": "SATISFIED",
+    "evidence": "Metastatic NSCLC on first-line pembrolizumab + carboplatin/pemetrexed. Initial imaging showed partial response. At the 6-month restaging visit, scans now show progression of known lesions with new nodal disease. Plan: discontinue current first-line regimen and discuss second-line options."
+  },
+  "EX_TEMPORAL_FOLFOX": {
+    "id": "EX_TEMPORAL_FOLFOX",
+    "label": "Temporal FOLFOX — response then later progression (false-X risk)",
+    "gold": "SATISFIED",
+    "evidence": "Metastatic colorectal cancer. First-line FOLFOX produced a partial response. At follow-up four months later, imaging demonstrated new hepatic lesions consistent with progression. FOLFOX was discontinued for treatment failure; second-line therapy discussed."
+  }
+}

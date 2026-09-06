@@ -57,9 +57,12 @@
     <h1>N2S Eval Workbench</h1>
     <p>
       Paste a note → fast Track A evaluation (extract → ground → Dual → AUTO/REVIEW).
-      Deep dive expands forensics only when you ask.
+      Deep dive expands forensics only when you ask. Intervene α steers the frozen L20 direction.
+      SAE features ranks Chanin L20 sparse features vs that direction, then steers top-k (± / random / group).
+      Upstream (formation) is a separate workbench: <a href="http://127.0.0.1:8258/">:8258</a>.
       · <a href="http://127.0.0.1:8253/">:8253 lab</a>
       · <a href="http://127.0.0.1:8256/">:8256 RepEng</a>
+      · <a href="http://127.0.0.1:8258/">:8258 Upstream</a>
       · <a href="https://udonsikalu.github.io/cxr-evidence-grounding-lab/">Pages demo</a>
     </p>
   </header>
@@ -81,6 +84,7 @@
         <button class="action" id="btn-eval">Evaluate</button>
         <button class="action secondary" id="btn-deep" disabled>Deep dive</button>
         <button class="action secondary" id="btn-intervene" disabled>Intervene α</button>
+        <button class="action secondary" id="btn-sae" disabled>SAE features</button>
         <button class="action secondary" id="btn-dl-json" disabled>Download JSON</button>
         <button class="action secondary" id="btn-dl-txt" disabled>Download report</button>
       </div>
@@ -98,6 +102,19 @@
           Include gaussian + reverse controls
         </label>
         <p class="muted" style="margin:8px 0 0;font-size:11px">Limited α=8 expand editor — not Ph10 BC_E* vector. Needs ~14 GiB free after Ollama unload.</p>
+      </div>
+      <div class="card" style="margin-top:10px;padding:10px 12px">
+        <label style="margin:0">SAE (Chanin L20 · decompose v)</label>
+        <select id="sae-top-k" style="margin-top:6px">
+          <option value="1">top-k = 1</option>
+          <option value="3" selected>top-k = 3</option>
+          <option value="5">top-k = 5</option>
+        </select>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-weight:500">
+          <input type="checkbox" id="sae-contra" checked style="width:auto;margin:0" />
+          Include EX_CONTRA true-contradiction control
+        </label>
+        <p class="muted" style="margin:8px 0 0;font-size:11px">Ranks sparse features vs frozen expand direction, then steers top-k (± / random / group). No English labels. Slow — many HF passes.</p>
       </div>
       <p class="status" id="status">Loading…</p>
       <label>Example notes</label>
@@ -117,7 +134,53 @@ let meta = null;
 let lastFast = null;
 let lastDeep = null;
 let lastIntervene = null;
+let lastSae = null;
 let pollTimer = null;
+
+const SESSION_KEY = 'n2s_eval_workbench_v1';
+
+function saveSession() {
+  try {
+    const payload = {
+      note: $('note')?.value || '',
+      gold: $('gold')?.value || 'UNKNOWN',
+      model: $('model')?.value || '',
+      alpha: $('alpha')?.value || '8',
+      sae_top_k: $('sae-top-k')?.value || '3',
+      lastFast,
+      lastDeep,
+      lastIntervene,
+      lastSae,
+    };
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(payload));
+  } catch (e) {
+    console.warn('session save failed', e);
+  }
+}
+
+function restoreSession() {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    if (!raw) return false;
+    const s = JSON.parse(raw);
+    if (s.note) $('note').value = s.note;
+    if (s.gold) $('gold').value = s.gold;
+    if (s.model && [...$('model').options].some(o => o.value === s.model)) {
+      $('model').value = s.model;
+    }
+    if (s.alpha && $('alpha')) $('alpha').value = s.alpha;
+    if (s.sae_top_k && $('sae-top-k')) $('sae-top-k').value = s.sae_top_k;
+    if (s.lastFast) renderFast(s.lastFast);
+    if (s.lastDeep) renderDeep(s.lastDeep);
+    if (s.lastIntervene) renderIntervene(s.lastIntervene);
+    if (s.lastSae) renderSae(s.lastSae);
+    syncActionButtons();
+    return true;
+  } catch (e) {
+    console.warn('session restore failed', e);
+    return false;
+  }
+}
 
 function esc(s) {
   return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -175,6 +238,7 @@ function enableDeepDownloads(rep) {
   $('btn-dl-json').disabled = false;
   $('btn-dl-txt').disabled = false;
   $('btn-intervene').disabled = false;
+  $('btn-sae').disabled = false;
 }
 
 function interveneReportText(rep) {
@@ -192,6 +256,7 @@ function interveneReportText(rep) {
 
 function renderIntervene(rep) {
   lastIntervene = rep;
+  saveSession();
   $('btn-dl-json').disabled = false;
   $('btn-dl-txt').disabled = false;
   const inv = rep.intervene || {};
@@ -199,26 +264,35 @@ function renderIntervene(rep) {
     const m = a.margin;
     const ms = (typeof m === 'number') ? m.toFixed(2) : '—';
     return `<tr><td>${esc(a.label)}</td><td>${esc(a.repair_final_x)}</td>
-      <td>${esc(a.verdict || '—')}</td><td>${esc(ms)}</td></tr>`;
+      <td>${esc(a.verdict || '—')}</td><td style="text-align:right">${esc(ms)}</td></tr>`;
   }).join('');
   const s = inv.summary || {};
   const flip = s.x_flipped_true_to_false === true
     ? '<p class="ok">full_vector flipped repair X true → false</p>'
     : (s.x_flipped_true_to_false === false
-      ? '<p class="muted">No true→false X flip at this α (partial editor — expected often).</p>'
+      ? '<p class="muted">No true→false X flip at this α (partial editor — expected often on true contradictions).</p>'
       : '');
   const warn = inv.ok === false
     ? `<p class="warn">${esc(inv.message || inv.status || 'intervene failed')}</p>`
     : '';
-  const card = `
-    <div class="card">
-      <h2>Intervene α=${esc(inv.alpha)} · L${esc(inv.steer_layer || 20)}</h2>
+  // Dedicated slot so Track A Evaluate output is not mistaken for α arms.
+  let slot = document.getElementById('intervene-slot');
+  if (!slot) {
+    slot = document.createElement('div');
+    slot.id = 'intervene-slot';
+    $('out').prepend(slot);
+  }
+  slot.innerHTML = `
+    <div class="card" style="border-color:var(--accent)">
+      <h2>HF Intervene arms · α=${esc(inv.alpha)} · L${esc(inv.steer_layer || 20)}</h2>
       <p class="muted" style="font-size:12px;margin:0 0 8px">${esc(inv.claim_note || '')}</p>
       ${warn}
-      <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:13px">
-        <tr style="color:var(--muted)"><th align="left">Arm</th><th align="left">X</th><th align="left">verdict</th><th align="right">margin</th></tr>
-        ${arms}
-      </table>
+      ${arms
+        ? `<table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:13px">
+            <tr style="color:var(--muted)"><th align="left">Arm</th><th align="left">X</th><th align="left">verdict</th><th align="right">margin</th></tr>
+            ${arms}
+          </table>`
+        : '<p class="warn">No arms in result.</p>'}
       ${flip}
       ${inv.ascii ? `<pre style="margin-top:12px">${esc(inv.ascii)}</pre>` : ''}
       <p class="muted" style="font-size:11px;margin-top:8px">artifact: ${esc(rep.artifact || '')}</p>
@@ -227,12 +301,105 @@ function renderIntervene(rep) {
         <button class="action secondary" type="button" id="btn-dl-inv-txt">Download intervene report</button>
       </div>
     </div>`;
-  $('out').insertAdjacentHTML('afterbegin', card);
   const id = (rep.case_id || 'intervene').replace(/[^\w.-]+/g, '_');
   $('btn-dl-inv-json').onclick = () =>
     downloadBlob(`n2s-intervene-${id}.json`, JSON.stringify(rep, null, 2), 'application/json');
   $('btn-dl-inv-txt').onclick = () =>
     downloadBlob(`n2s-intervene-${id}.txt`, interveneReportText(rep), 'text/plain;charset=utf-8');
+  slot.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function syncActionButtons() {
+  const hasNote = !!$('note').value.trim();
+  // SAE / Intervene only need a pasted note; Deep dive needs Evaluate first.
+  $('btn-sae').disabled = !hasNote;
+  $('btn-intervene').disabled = !hasNote;
+  $('btn-deep').disabled = !lastFast;
+}
+
+function saeReportText(rep) {
+  const parts = [];
+  parts.push(`N2S EVAL SAE — ${rep.case_id || '?'}`);
+  parts.push(`top_k=${rep.top_k} α=${rep.alpha}`);
+  parts.push(`timestamp: ${rep.timestamp || ''}`);
+  parts.push('');
+  parts.push('RANKED TOP');
+  parts.push(JSON.stringify(rep.ranked_top || [], null, 2));
+  parts.push('');
+  const panel = rep.sae || {};
+  for (const [nk, block] of Object.entries(panel.notes || {})) {
+    parts.push(`--- ${nk} gold=${block.gold} baseline_X=${block.baseline_x} ---`);
+    for (const a of (block.arms || [])) {
+      parts.push(`  ${a.label}\tX=${a.repair_final_x}\tmargin=${a.margin}\t${a.verdict || ''}`);
+    }
+    parts.push('');
+  }
+  parts.push(`artifact: ${rep.artifact || ''}`);
+  return parts.join('\n');
+}
+
+function renderSae(rep) {
+  lastSae = rep;
+  saveSession();
+  $('btn-dl-json').disabled = false;
+  $('btn-dl-txt').disabled = false;
+  $('btn-sae').disabled = false;
+  const panel = rep.sae || {};
+  const ranked = (rep.ranked_top || panel.candidates || []).map(r =>
+    `<tr><td>${esc(r.feat_id)}</td>
+      <td style="text-align:right">${esc(Number(r.delta_A_minus_B).toFixed(3))}</td>
+      <td style="text-align:right">${esc(Number(r.cos_to_v).toFixed(3))}</td>
+      <td style="text-align:right">${esc(r.corr_with_X == null ? '—' : Number(r.corr_with_X).toFixed(3))}</td>
+      <td style="text-align:right">${esc(r.corr_with_margin == null ? '—' : Number(r.corr_with_margin).toFixed(3))}</td></tr>`
+  ).join('');
+  let notesHtml = '';
+  if (panel.ok === false) {
+    notesHtml = `<p class="warn">${esc(panel.message || panel.status || 'SAE deferred/error')}</p>`;
+  } else {
+    for (const [nk, block] of Object.entries(panel.notes || {})) {
+      const arms = (block.arms || []).map(a => {
+        const m = a.margin;
+        const ms = (typeof m === 'number') ? m.toFixed(2) : '—';
+        return `<tr><td>${esc(a.label)}</td><td>${esc(a.repair_final_x)}</td>
+          <td>${esc(a.verdict || '—')}</td><td style="text-align:right">${esc(ms)}</td></tr>`;
+      }).join('');
+      notesHtml += `
+        <h3 style="margin:14px 0 6px;font-size:14px">${esc(nk)} · gold ${esc(block.gold)} · baseline X=${esc(block.baseline_x)}</h3>
+        <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:13px">
+          <tr style="color:var(--muted)"><th align="left">Arm</th><th align="left">X</th><th align="left">verdict</th><th align="right">margin</th></tr>
+          ${arms}
+        </table>`;
+    }
+  }
+  let slot = document.getElementById('sae-slot');
+  if (!slot) {
+    slot = document.createElement('div');
+    slot.id = 'sae-slot';
+    $('out').prepend(slot);
+  }
+  slot.innerHTML = `
+    <div class="card" style="border-color:var(--accent)">
+      <h2>SAE · Chanin L20 · top-${esc(rep.top_k)} · α=${esc(rep.alpha)}</h2>
+      <p class="muted" style="font-size:12px;margin:0 0 8px">Decompose frozen v — feat_id / Δ(A−B) / cos_to_v / track X·margin. No English labels.</p>
+      ${ranked
+        ? `<table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px;margin-bottom:10px">
+            <tr style="color:var(--muted)"><th align="left">feat</th><th align="right">Δ(A−B)</th><th align="right">cos_v</th><th align="right">r_X</th><th align="right">r_margin</th></tr>
+            ${ranked}
+          </table>`
+        : ''}
+      ${notesHtml}
+      <p class="muted" style="margin:10px 0 0;font-size:11px;font-family:var(--mono)">artifact ${esc(rep.artifact || '')}</p>
+      <div class="btn-row" style="margin-top:10px">
+        <button class="action secondary" type="button" id="btn-dl-sae-json">Download SAE JSON</button>
+        <button class="action secondary" type="button" id="btn-dl-sae-txt">Download SAE report</button>
+      </div>
+    </div>`;
+  const id = (rep.case_id || 'sae').replace(/[^\w.-]+/g, '_');
+  $('btn-dl-sae-json').onclick = () =>
+    downloadBlob(`n2s-sae-${id}.json`, JSON.stringify(rep, null, 2), 'application/json');
+  $('btn-dl-sae-txt').onclick = () =>
+    downloadBlob(`n2s-sae-${id}.txt`, saeReportText(rep), 'text/plain;charset=utf-8');
+  slot.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 async function init() {
@@ -252,10 +419,23 @@ async function init() {
       if (!ex) return;
       $('note').value = ex.evidence;
       $('gold').value = ex.gold || 'UNKNOWN';
+      syncActionButtons();
     };
   });
+  $('note').addEventListener('input', () => {
+    syncActionButtons();
+    saveSession();
+  });
+  $('gold').addEventListener('change', saveSession);
+  $('model').addEventListener('change', saveSession);
+  $('alpha').addEventListener('change', saveSession);
+  $('sae-top-k').addEventListener('change', saveSession);
+  const restored = restoreSession();
+  syncActionButtons();
   const oll = meta.ollama_reachable ? 'Ollama up' : 'Ollama down — use Mock';
-  $('status').textContent = `${oll} · port ${meta.port} · ${meta.capabilities?.note || ''}`;
+  $('status').textContent = restored
+    ? `${oll} · port ${meta.port} · restored prior Evaluate/Intervene/SAE from this tab`
+    : `${oll} · port ${meta.port} · ${meta.capabilities?.note || ''}`;
 }
 
 function pathFieldDiff(r) {
@@ -288,8 +468,10 @@ function pathFieldDiff(r) {
 
 function renderFast(r) {
   lastFast = r;
+  saveSession();
   $('btn-deep').disabled = false;
   $('btn-intervene').disabled = false;
+  $('btn-sae').disabled = false;
   const disp = r.disposition === 'REVIEW' ? 'review' : 'auto';
   const mm = r.mismatch || {};
   const mmCls = mm.agree === false ? 'bad' : mm.agree === true ? 'ok' : 'warn';
@@ -397,6 +579,8 @@ function renderForensicsBlock(title, f, isExample) {
 
 function renderDeep(rep) {
   enableDeepDownloads(rep);
+  lastDeep = rep;
+  saveSession();
   const narr = (rep.narrative || []).map(l => `<li>${esc(l)}</li>`).join('');
   const liveF = rep.forensics && rep.forensics.ok ? rep.forensics : null;
   const exF = rep.forensics_example || (!liveF && rep.forensics?.status === 'deferred_gpu_busy' ? rep.forensics_example : rep.forensics_example);
@@ -462,6 +646,7 @@ $('btn-deep').onclick = async () => {
   if (!lastFast) return;
   $('btn-deep').disabled = true;
   $('btn-intervene').disabled = true;
+  $('btn-sae').disabled = true;
   $('status').textContent = 'Deep dive queued…';
   const sub = await fetch('/api/deep-dive', {
     method: 'POST',
@@ -472,6 +657,7 @@ $('btn-deep').onclick = async () => {
     $('status').innerHTML = `<span class="bad">${esc(sub.error || 'failed')}</span>`;
     $('btn-deep').disabled = false;
     $('btn-intervene').disabled = false;
+    $('btn-sae').disabled = false;
     return;
   }
   if (pollTimer) clearInterval(pollTimer);
@@ -483,6 +669,7 @@ $('btn-deep').onclick = async () => {
       renderDeep(st.result);
       $('btn-deep').disabled = false;
       $('btn-intervene').disabled = false;
+      $('btn-sae').disabled = false;
       $('status').textContent = 'Deep dive done';
     }
     if (st.state === 'error') {
@@ -490,6 +677,7 @@ $('btn-deep').onclick = async () => {
       $('status').innerHTML = `<span class="bad">${esc(st.error)}</span>`;
       $('btn-deep').disabled = false;
       $('btn-intervene').disabled = false;
+      $('btn-sae').disabled = false;
     }
   }, 1500);
 };
@@ -501,6 +689,7 @@ $('btn-intervene').onclick = async () => {
     return;
   }
   $('btn-intervene').disabled = true;
+  $('btn-sae').disabled = true;
   $('btn-deep').disabled = true;
   $('btn-eval').disabled = true;
   $('status').textContent = 'Intervene queued… (HF 7B · several repair passes)';
@@ -519,9 +708,8 @@ $('btn-intervene').onclick = async () => {
   }).then(r => r.json());
   if (!sub.ok) {
     $('status').innerHTML = `<span class="bad">${esc(sub.error || 'failed')}</span>`;
-    $('btn-intervene').disabled = false;
-    $('btn-deep').disabled = !lastFast;
     $('btn-eval').disabled = false;
+    syncActionButtons();
     return;
   }
   if (pollTimer) clearInterval(pollTimer);
@@ -531,14 +719,69 @@ $('btn-intervene').onclick = async () => {
     if (st.state === 'done' && st.result) {
       clearInterval(pollTimer);
       renderIntervene(st.result);
-      $('btn-intervene').disabled = false;
-      $('btn-deep').disabled = !lastFast;
       $('btn-eval').disabled = false;
+      syncActionButtons();
       $('status').textContent = 'Intervene done';
     }
     if (st.state === 'error') {
       clearInterval(pollTimer);
       $('status').innerHTML = `<span class="bad">${esc(st.error)}</span>`;
+      $('btn-eval').disabled = false;
+      syncActionButtons();
+    }
+  }, 2000);
+};
+
+$('btn-sae').onclick = async () => {
+  const note = $('note').value.trim();
+  if (!note) {
+    $('status').innerHTML = '<span class="bad">Paste a note first</span>';
+    return;
+  }
+  $('btn-sae').disabled = true;
+  $('btn-intervene').disabled = true;
+  $('btn-deep').disabled = true;
+  $('btn-eval').disabled = true;
+  $('status').textContent = 'SAE queued… (rank + top-k HF steers — several minutes)';
+  const sub = await fetch('/api/sae', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      note,
+      model: $('model').value,
+      gold: $('gold').value,
+      case_id: lastFast?.case_id || lastDeep?.case_id || undefined,
+      alpha: Number($('alpha').value),
+      top_k: Number($('sae-top-k').value),
+      include_contra_control: $('sae-contra').checked,
+      parent_deep: lastDeep?.artifact || null,
+    }),
+  }).then(r => r.json());
+  if (!sub.ok) {
+    $('status').innerHTML = `<span class="bad">${esc(sub.error || 'failed')}</span>`;
+    $('btn-sae').disabled = false;
+    $('btn-intervene').disabled = false;
+    $('btn-deep').disabled = !lastFast;
+    $('btn-eval').disabled = false;
+    return;
+  }
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    const st = await fetch('/api/job').then(r => r.json());
+    $('status').textContent = `SAE · ${st.state} · ${st.step || ''}`;
+    if (st.state === 'done' && st.result) {
+      clearInterval(pollTimer);
+      renderSae(st.result);
+      $('btn-sae').disabled = false;
+      $('btn-intervene').disabled = false;
+      $('btn-deep').disabled = !lastFast;
+      $('btn-eval').disabled = false;
+      $('status').textContent = 'SAE done';
+    }
+    if (st.state === 'error') {
+      clearInterval(pollTimer);
+      $('status').innerHTML = `<span class="bad">${esc(st.error)}</span>`;
+      $('btn-sae').disabled = false;
       $('btn-intervene').disabled = false;
       $('btn-deep').disabled = !lastFast;
       $('btn-eval').disabled = false;

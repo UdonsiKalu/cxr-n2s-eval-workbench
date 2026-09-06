@@ -76,6 +76,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return _json_response(self, api.submit_deep_dive(body))
             if path == "/api/intervene":
                 return _json_response(self, api.submit_intervene(body))
+            if path == "/api/sae":
+                return _json_response(self, api.submit_sae(body))
             return _json_response(self, {"error": "not found"}, 404)
         except Exception as exc:  # noqa: BLE001
             return _json_response(
@@ -96,6 +98,8 @@ def main() -> None:
     print(f"  Fast path         POST /api/evaluate  (Track A Dual + mismatch)")
     print(f"  Deep dive         POST /api/deep-dive (round-trip forensics)")
     print(f"  Intervene (α)     POST /api/intervene (HF L20 expand steer)")
+    print(f"  SAE pilot         POST /api/sae       (Chanin L20 top-k features)")
+    print(f"  Upstream          http://127.0.0.1:8258/  (separate workbench)")
     print(f"  Lab               {api.LAB_ROOT}")
     try:
         httpd.serve_forever()

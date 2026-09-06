@@ -1,0 +1,119 @@
+{
+  "track": "N2S Eval Walkthrough (CLI)",
+  "companion_pdf": "docs/N2S-Workbench-Newcomer-Tour.pdf",
+  "lessons": [
+    {
+      "id": "W00",
+      "file": "W00-welcome.md",
+      "title": "Welcome — CLI walkthrough of the project",
+      "phase": "orient",
+      "action": "none",
+      "requires_gpu": false,
+      "requires_ollama": false
+    },
+    {
+      "id": "W01",
+      "file": "W01-atoms-traps.md",
+      "title": "Atoms A–D / X and two traps",
+      "phase": "theory",
+      "action": "none",
+      "requires_gpu": false,
+      "requires_ollama": false
+    },
+    {
+      "id": "W02",
+      "file": "W02-evaluate-contra.md",
+      "title": "Evaluate — true contradiction → AUTO",
+      "phase": "evaluate",
+      "action": "evaluate",
+      "note_id": "EX_CONTRA",
+      "requires_gpu": false,
+      "requires_ollama": true,
+      "expect": {
+        "disposition": "AUTO",
+        "verdict": "CONTRADICTION"
+      }
+    },
+    {
+      "id": "W03",
+      "file": "W03-evaluate-planned.md",
+      "title": "Evaluate — planned only → NOT_SATISFIED",
+      "phase": "evaluate",
+      "action": "evaluate",
+      "note_id": "EX_PLANNED",
+      "requires_gpu": false,
+      "requires_ollama": true,
+      "expect": {
+        "disposition": "AUTO",
+        "verdict": "NOT_SATISFIED"
+      }
+    },
+    {
+      "id": "W04",
+      "file": "W04-evaluate-temporal-review.md",
+      "title": "Evaluate — temporal note often REVIEW (containment)",
+      "phase": "evaluate",
+      "action": "evaluate",
+      "note_id": "EX_TEMPORAL_FOLFOX",
+      "requires_gpu": false,
+      "requires_ollama": true,
+      "expect": {
+        "soft": true,
+        "note": "Often REVIEW via N2S mismatch; AUTO SATISFIED also OK if X already clean"
+      }
+    },
+    {
+      "id": "W05",
+      "file": "W05-deepdive-label-rule.md",
+      "title": "Deep dive — L20 readout + NOT EVALUATED rule",
+      "phase": "deep_dive",
+      "action": "deep_dive",
+      "note_id": "EX_PLANNED",
+      "requires_gpu": true,
+      "requires_ollama": true,
+      "expect": {
+        "soft": true,
+        "note": "Commitment NOT_SATISFIED → representation–commitment comparison NOT EVALUATED"
+      }
+    },
+    {
+      "id": "W06",
+      "file": "W06-intervene-control.md",
+      "title": "Intervene alpha=8 — true contra must not flip",
+      "phase": "intervene",
+      "action": "intervene",
+      "note_id": "EX_CONTRA",
+      "alpha": 8.0,
+      "requires_gpu": true,
+      "requires_ollama": false,
+      "expect": {
+        "baseline_x": true,
+        "full_vector_x": true
+      }
+    },
+    {
+      "id": "W07",
+      "file": "W07-intervene-flip.md",
+      "title": "Intervene alpha=8 — temporal selective flip + controls",
+      "phase": "intervene",
+      "action": "intervene",
+      "note_id": "EX_TEMPORAL_FOLFOX",
+      "alpha": 8.0,
+      "requires_gpu": true,
+      "requires_ollama": false,
+      "expect": {
+        "soft": true,
+        "note": "Ideal: baseline X=true → full_vector X=false; gaussian stays true"
+      }
+    },
+    {
+      "id": "W08",
+      "file": "W08-claim-hygiene.md",
+      "title": "Claim hygiene and what comes next",
+      "phase": "close",
+      "action": "none",
+      "requires_gpu": false,
+      "requires_ollama": false
+    }
+  ]
+}

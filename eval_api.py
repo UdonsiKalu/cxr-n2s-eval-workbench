@@ -43,6 +43,17 @@ RUNS_DIR = ARTIFACTS_DIR / "n2s-eval-runs"
 
 EXAMPLE_NOTES = [
     {
+        "id": "EX_TEMPORAL_FOLFOX",
+        "label": "Temporal FOLFOX — response then later failure",
+        "gold": "SATISFIED",
+        "evidence": (
+            "Metastatic colorectal cancer. First-line FOLFOX produced a partial response. "
+            "At follow-up four months later, imaging demonstrated new hepatic lesions "
+            "consistent with progression. FOLFOX was discontinued for treatment failure; "
+            "second-line therapy discussed."
+        ),
+    },
+    {
         "id": "EX_BC_E1",
         "label": "BC_E1-style — response then later failure (not contradiction)",
         "gold": "SATISFIED",
@@ -112,6 +123,7 @@ def meta_payload() -> dict[str, Any]:
             "behavioral": True,
             "activations": True,
             "intervene_alpha": True,
+            "sae_pilot": True,
             "unload_ollama_after_run": True,
             "note": (
                 "Fast path = Track A (extract→ground→verify→Dual→AUTO/REVIEW). "
@@ -119,13 +131,22 @@ def meta_payload() -> dict[str, Any]:
                 "and verified via /api/ps before returning. "
                 "Deep dive adds HF forensics when GPU free. "
                 "Intervene runs frozen expand L20 α-steer (baseline + full + controls). "
+                "SAE pilot ranks Chanin L20 features vs frozen v, then steers top-k "
+                "on the pasted note (+ EX_CONTRA control). "
+                "Upstream lives on :8258 (not this port). "
                 "Pass unload_after=false to keep the model warm."
             ),
             "intervene_default_alpha": 8.0,
+            "sae_default_top_k": 3,
             "intervene_claim": (
                 "Expand L20 unit(mean_A−mean_B); limited α=8 partial editor "
                 "(not family-wide; not Ph10 BC_E* vector)."
             ),
+            "sae_claim": (
+                "Chanin Qwen2.5-7B L20 JumpReLU SAE; decompose v; no English labels; "
+                "causal top-k on note + true-contra control."
+            ),
+            "upstream_workbench": "http://127.0.0.1:8258/",
         },
     }
 
@@ -749,6 +770,110 @@ def submit_intervene(body: dict[str, Any]) -> dict[str, Any]:
                 _job["error"] = str(exc)
                 _job["log"] = (_job.get("log") or []) + [traceback.format_exc()[-600:]]
             _log(f"intervene ERROR: {exc}")
+
+    threading.Thread(target=worker, daemon=True).start()
+    return {"ok": True, "job_id": jid, "job": job_status()}
+
+
+def submit_sae(body: dict[str, Any]) -> dict[str, Any]:
+    """Async SAE pilot: rank (cached) + top-k feature steer on note + EX_CONTRA."""
+    note = (body.get("note") or "").strip()
+    if not note:
+        raise ValueError("note required")
+    case_id = (body.get("case_id") or f"LIVE_{uuid.uuid4().hex[:8]}").strip()
+    gold = (body.get("gold") or "").strip() or "UNKNOWN"
+    alpha = float(body.get("alpha") if body.get("alpha") is not None else 8.0)
+    top_k = int(body.get("top_k") if body.get("top_k") is not None else 3)
+    top_k = max(1, min(top_k, 5))
+    refresh_scores = body.get("refresh_scores", False)
+    if isinstance(refresh_scores, str):
+        refresh_scores = refresh_scores.strip().lower() not in ("0", "false", "no")
+    include_contra = body.get("include_contra_control", True)
+    if isinstance(include_contra, str):
+        include_contra = include_contra.strip().lower() not in ("0", "false", "no")
+    parent_deep = body.get("parent_deep")
+
+    with _lock:
+        if _job["state"] in ("queued", "running"):
+            return {"ok": False, "error": "job already running", "job": job_status()}
+        jid = uuid.uuid4().hex[:8]
+        _job.update(
+            {
+                "id": jid,
+                "kind": "sae",
+                "state": "queued",
+                "step": "queued",
+                "result": None,
+                "error": None,
+                "log": [],
+            }
+        )
+
+    def worker() -> None:
+        with _lock:
+            _job["state"] = "running"
+            _job["step"] = "unload ollama"
+        try:
+            model = (body.get("model") or DEFAULT_MODEL)
+            if model and model != "mock":
+                freed = unload_model(model)
+                _log(
+                    f"pre-sae ollama unload {model}: "
+                    f"ok={freed.get('ok')} verified={freed.get('verified')}"
+                )
+        except Exception as exc:  # noqa: BLE001
+            _log(f"pre-sae ollama unload skipped: {exc}")
+
+        _job["step"] = f"SAE top_k={top_k} α={alpha}"
+        _log(f"sae {jid} start top_k={top_k} α={alpha} refresh={refresh_scores}")
+        try:
+            from n2s_lab.n2s_sae_pilot import SCORE_PATH, run_workbench_sae
+
+            panel = run_workbench_sae(
+                note=note,
+                case_id=case_id,
+                gold=gold,
+                top_k=top_k,
+                alpha=alpha,
+                include_contra_control=include_contra,
+                refresh_scores=refresh_scores,
+            )
+            scores_top = []
+            try:
+                if SCORE_PATH.exists():
+                    scores_top = (
+                        json.loads(SCORE_PATH.read_text(encoding="utf-8")).get("top") or []
+                    )[:top_k]
+            except Exception:  # noqa: BLE001
+                scores_top = panel.get("candidates") or []
+
+            report = {
+                "schema": "n2s_eval_sae_v1",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "case_id": case_id,
+                "note": note,
+                "gold": gold,
+                "parent_deep": parent_deep,
+                "top_k": top_k,
+                "alpha": alpha,
+                "ranked_top": scores_top,
+                "sae": panel,
+            }
+            RUNS_DIR.mkdir(parents=True, exist_ok=True)
+            path = RUNS_DIR / f"sae-{case_id}-{uuid.uuid4().hex[:6]}.json"
+            path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+            report["artifact"] = str(path)
+            with _lock:
+                _job["result"] = report
+                _job["state"] = "done"
+                _job["step"] = "done"
+            _log(f"sae {jid} done → {path}")
+        except Exception as exc:  # noqa: BLE001
+            with _lock:
+                _job["state"] = "error"
+                _job["error"] = str(exc)
+                _job["log"] = (_job.get("log") or []) + [traceback.format_exc()[-600:]]
+            _log(f"sae ERROR: {exc}")
 
     threading.Thread(target=worker, daemon=True).start()
     return {"ok": True, "job_id": jid, "job": job_status()}
