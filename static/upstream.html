@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>N2S Upstream Workbench</title>
+  <style>
+    :root {
+      --bg: #0f1419; --paper: #1a222c; --ink: #e8eef4; --muted: #8b9aab;
+      --line: #2a3542; --accent: #5b9fd4; --ok: #3dbf7a; --bad: #e05555; --warn: #d4a017;
+      --mono: "IBM Plex Mono", ui-monospace, monospace;
+      --sans: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 var(--sans); }
+    header { padding: 16px 20px; border-bottom: 1px solid var(--line); background: var(--paper); }
+    header h1 { margin: 0 0 4px; font-size: 20px; font-weight: 650; }
+    header p { margin: 0; color: var(--muted); font-size: 13px; }
+    header a { color: var(--accent); }
+    .layout { display: grid; grid-template-columns: 1fr 1.15fr; gap: 0; min-height: calc(100vh - 90px); }
+    @media (max-width: 960px) { .layout { grid-template-columns: 1fr; } }
+    .panel { padding: 16px 18px 28px; }
+    .panel.left { border-right: 1px solid var(--line); }
+    label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 12px 0 6px; }
+    select, textarea, input[type="text"] {
+      width: 100%; background: #121820; color: var(--ink); border: 1px solid var(--line);
+      border-radius: 4px; padding: 10px; font: inherit;
+    }
+    textarea { min-height: 160px; resize: vertical; line-height: 1.5; }
+    .btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    button.action {
+      background: var(--accent); color: #0a0e14; border: 0; padding: 10px 16px;
+      border-radius: 4px; font: inherit; font-weight: 650; cursor: pointer;
+    }
+    button.action:disabled { opacity: 0.45; cursor: not-allowed; }
+    button.action.secondary { background: #243040; color: var(--ink); border: 1px solid var(--line); }
+    .card { background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; margin-bottom: 12px; }
+    .card h2 { margin: 0 0 10px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); }
+    .ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); } .muted { color: var(--muted); }
+    .pill { display: inline-block; padding: 3px 8px; border-radius: 3px; border: 1px solid var(--line); font-size: 12px; font-weight: 650; margin-right: 6px; }
+    .status { font-size: 13px; color: var(--muted); margin-top: 10px; }
+    .examples button {
+      display: block; width: 100%; text-align: left; background: #121820; border: 1px solid var(--line);
+      color: var(--ink); padding: 8px 10px; margin-bottom: 6px; border-radius: 4px; cursor: pointer; font: inherit; font-size: 13px;
+    }
+    .examples button:hover { border-color: var(--accent); }
+    table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
+    ul.reasons { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>N2S Upstream Workbench</h1>
+    <p>
+      Paste a clinical note → score against the frozen U-A formation direction
+      <span style="font-family:var(--mono)">d = unit(μ_T−μ_C)</span>.
+      Optional custom temporal/contra pair map. Read-only frozen replay also available.
+      Not ablation / SAE / α·v.
+      · <a href="http://127.0.0.1:8257/">:8257 Track A / Intervene</a>
+      · <a href="http://127.0.0.1:8253/">:8253 lab</a>
+    </p>
+  </header>
+  <div class="layout">
+    <div class="panel left">
+      <label>Case id (optional)</label>
+      <input type="text" id="case_id" placeholder="LIVE_FOLFOX_…" />
+      <label>Optional gold</label>
+      <select id="gold">
+        <option value="UNKNOWN">Unknown</option>
+        <option value="SATISFIED">SATISFIED</option>
+        <option value="NOT_SATISFIED">NOT_SATISFIED</option>
+        <option value="CONTRADICTION">CONTRADICTION</option>
+      </select>
+      <label>Clinical note (for live score)</label>
+      <textarea id="note" placeholder="Paste a doctor’s note…"></textarea>
+      <div class="btn-row">
+        <button class="action" id="btn-score">Score vs frozen d</button>
+        <button class="action secondary" id="btn-frozen">Frozen U-A/U-B replay</button>
+      </div>
+      <div class="card" style="margin-top:14px;padding:10px 12px">
+        <label style="margin:0">Custom pair map (optional)</label>
+        <p class="muted" style="margin:6px 0 8px;font-size:12px">Builds a new class-mean Δ from two pasted notes (heavier — two HF captures).</p>
+        <label>Temporal note</label>
+        <textarea id="temporal" style="min-height:100px" placeholder="Response then later failure…"></textarea>
+        <label>Contra note</label>
+        <textarea id="contra" style="min-height:100px" placeholder="Same-time failed vs responsive…"></textarea>
+        <div class="btn-row">
+          <button class="action secondary" id="btn-pair">Map custom pair</button>
+        </div>
+      </div>
+      <p class="status" id="status">Loading…</p>
+      <label>Example notes</label>
+      <div class="examples" id="examples"></div>
+    </div>
+    <div class="panel" id="out">
+      <div class="card"><p class="muted">Results appear here after Score or Frozen replay.</p></div>
+    </div>
+  </div>
+<script>
+const $ = (id) => document.getElementById(id);
+let meta = null;
+let pollTimer = null;
+
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function fmtNum(n, d = 3) {
+  return (typeof n === 'number' && Number.isFinite(n)) ? n.toFixed(d) : '—';
+}
+
+function layerBarsScore(byLayer, bestKey) {
+  const keys = Object.keys(byLayer || {});
+  if (!keys.length) return '<p class="muted">No layers.</p>';
+  const vals = keys.map(k => Number(byLayer[k].mean_abs_score_d) || Math.abs(Number(byLayer[k].mean_score_d) || 0));
+  const max = Math.max(...vals, 1);
+  return keys.map((k, i) => {
+    const n = vals[i];
+    const pct = Math.max(2, Math.round(100 * n / max));
+    const best = k === bestKey;
+    const cos = byLayer[k].cos_d_vs_freeze_v;
+    return `<div style="display:grid;grid-template-columns:48px 1fr 100px;gap:8px;align-items:center;margin:4px 0;font-family:var(--mono);font-size:12px">
+      <span class="${best ? 'ok' : ''}">${esc(k)}</span>
+      <div style="background:#121820;border:1px solid var(--line);height:14px;border-radius:2px;overflow:hidden">
+        <div style="width:${pct}%;height:100%;background:${best ? 'var(--ok)' : 'var(--accent)'}"></div>
+      </div>
+      <span style="text-align:right">|μ·d| ${esc(fmtNum(n, 1))}${cos != null ? ' · cos ' + esc(fmtNum(cos, 3)) : ''}</span>
+    </div>`;
+  }).join('');
+}
+
+function topSitesTable(sites, title) {
+  if (!sites || !sites.length) return '';
+  const rows = sites.map(s =>
+    `<tr><td>${esc(s.token)}</td>
+      <td style="text-align:right">${esc(fmtNum(s.score_d, 2))}</td>
+      <td style="text-align:right">${esc(fmtNum(s.cos_v, 3))}</td></tr>`
+  ).join('');
+  return `<h3 style="margin:14px 0 6px;font-size:14px">${esc(title)}</h3>
+    <table>
+      <tr style="color:var(--muted)"><th align="left">tok</th><th align="right">score_d</th><th align="right">cos_v</th></tr>
+      ${rows}
+    </table>`;
+}
+
+function renderScore(rep) {
+  const by = rep.by_layer || {};
+  const best = rep.best_layer;
+  const sites = (best && by[best]) ? by[best].top_sites : [];
+  const warn = rep.ok === false
+    ? `<p class="warn">${esc(rep.message || rep.error || 'failed')}</p>` : '';
+  $('out').innerHTML = `
+    <div class="card" style="border-color:var(--accent)">
+      <h2>Live score · vs frozen U-A d</h2>
+      ${warn}
+      <p class="muted" style="font-size:12px;margin:0 0 8px">${esc(rep.quest || '')}</p>
+      <p style="margin:0 0 8px"><b>${esc(rep.case_id)}</b>
+        <span class="muted"> · ${esc(rep.n_note_tokens)} note tokens · dirs ${rep.directions_cached ? 'cached' : 'baked'}</span></p>
+      <p class="muted" style="font-size:13px;margin:0 0 10px">Best layer highlight: <span class="ok">${esc(best || '—')}</span></p>
+      <h3 style="margin:0 0 6px;font-size:14px">mean |token·d| by layer</h3>
+      ${layerBarsScore(by, best)}
+      ${topSitesTable(sites, `Top sites @ ${best || '?'}`)}
+      <p class="muted" style="font-size:11px;margin-top:10px;font-family:var(--mono)">${esc(rep.artifact || '')}</p>
+    </div>`;
+}
+
+function renderPair(rep) {
+  const by = rep.by_layer || {};
+  const best = rep.best_layer;
+  let sitesHtml = '';
+  if (best && by[best]?.notes) {
+    for (const [nid, nb] of Object.entries(by[best].notes)) {
+      sitesHtml += topSitesTable(nb.top_sites, `${nid} @ ${best}`);
+    }
+  }
+  const bars = Object.entries(by).map(([k, block]) => {
+    const n = Number(block.delta_mean_norm) || 0;
+    return { k, n, cos: block.cos_d_vs_freeze_v };
+  });
+  const max = Math.max(...bars.map(b => b.n), 1);
+  const barHtml = bars.map(b => {
+    const pct = Math.max(2, Math.round(100 * b.n / max));
+    const bestB = b.k === best;
+    return `<div style="display:grid;grid-template-columns:48px 1fr 100px;gap:8px;align-items:center;margin:4px 0;font-family:var(--mono);font-size:12px">
+      <span class="${bestB ? 'ok' : ''}">${esc(b.k)}</span>
+      <div style="background:#121820;border:1px solid var(--line);height:14px;border-radius:2px;overflow:hidden">
+        <div style="width:${pct}%;height:100%;background:${bestB ? 'var(--ok)' : 'var(--accent)'}"></div>
+      </div>
+      <span style="text-align:right">${esc(fmtNum(b.n, 1))} · cos ${esc(fmtNum(b.cos, 3))}</span>
+    </div>`;
+  }).join('');
+  $('out').innerHTML = `
+    <div class="card" style="border-color:var(--accent)">
+      <h2>Live custom pair · U-A-style map</h2>
+      <p class="muted" style="font-size:12px;margin:0 0 8px">${esc(rep.quest || '')}</p>
+      <p>Best layer <span class="ok">${esc(best || '—')}</span>
+        <span class="muted"> · ||μ_T−μ_C||≈${esc(fmtNum(rep.best_delta_mean_norm, 1))}</span></p>
+      <h3 style="margin:12px 0 6px;font-size:14px">||μ_T−μ_C|| by layer</h3>
+      ${barHtml}
+      ${sitesHtml}
+      <p class="muted" style="font-size:11px;margin-top:10px;font-family:var(--mono)">${esc(rep.artifact || '')}</p>
+    </div>`;
+}
+
+function renderFrozen(rep) {
+  const ua = rep.ua || {};
+  const layers = ua.layers || [];
+  const max = Math.max(...layers.map(L => Number(L.delta_mean_norm) || 0), 1);
+  const bars = layers.map(L => {
+    const n = Number(L.delta_mean_norm) || 0;
+    const pct = Math.max(2, Math.round(100 * n / max));
+    const best = String(L.layer_key) === String(ua.best_layer);
+    return `<div style="display:grid;grid-template-columns:48px 1fr 88px;gap:8px;align-items:center;margin:4px 0;font-family:var(--mono);font-size:12px">
+      <span class="${best ? 'ok' : ''}">${esc(L.layer_key)}</span>
+      <div style="background:#121820;border:1px solid var(--line);height:14px;border-radius:2px;overflow:hidden">
+        <div style="width:${pct}%;height:100%;background:${best ? 'var(--ok)' : 'var(--accent)'}"></div>
+      </div>
+      <span style="text-align:right">${esc(fmtNum(n, 1))}</span>
+    </div>`;
+  }).join('');
+  const frozen = (rep.frozen_notes || []).map(n =>
+    `<p style="margin:6px 0"><b style="font-family:var(--mono)">${esc(n.id)}</b>
+      <span class="muted"> ${esc(n.role)}</span><br/>${esc(n.evidence)}</p>`
+  ).join('');
+  $('out').innerHTML = `
+    <div class="card">
+      <h2>Frozen U-A / U-B replay</h2>
+      <p class="muted" style="font-size:12px">Lab artifacts only — not a live run.</p>
+      <p>Best layer <span class="ok">${esc(ua.best_layer || '—')}</span></p>
+      <p class="muted" style="font-size:13px">${esc(ua.formation_hypothesis || '')}</p>
+      ${bars}
+      <h3 style="margin:14px 0 6px;font-size:14px">Frozen pair texts</h3>
+      ${frozen}
+      <ul class="reasons">${(ua.findings || []).map(f => `<li>${esc(f)}</li>`).join('')}</ul>
+    </div>`;
+}
+
+async function pollUntilDone(label) {
+  if (pollTimer) clearInterval(pollTimer);
+  return new Promise((resolve, reject) => {
+    pollTimer = setInterval(async () => {
+      try {
+        const st = await fetch('/api/job').then(r => r.json());
+        $('status').textContent = `${label} · ${st.state} · ${st.step || ''}`;
+        if (st.state === 'done' && st.result) {
+          clearInterval(pollTimer);
+          resolve(st.result);
+        }
+        if (st.state === 'error') {
+          clearInterval(pollTimer);
+          reject(new Error(st.error || 'job error'));
+        }
+      } catch (e) {
+        clearInterval(pollTimer);
+        reject(e);
+      }
+    }, 1500);
+  });
+}
+
+function setBusy(busy) {
+  $('btn-score').disabled = busy;
+  $('btn-pair').disabled = busy;
+  $('btn-frozen').disabled = busy;
+}
+
+$('btn-score').onclick = async () => {
+  const note = $('note').value.trim();
+  if (!note) { $('status').innerHTML = '<span class="bad">Paste a clinical note first</span>'; return; }
+  setBusy(true);
+  $('status').textContent = 'Score queued… (may bake directions on first run)';
+  try {
+    const sub = await fetch('/api/score', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        note,
+        case_id: $('case_id').value.trim() || undefined,
+        gold: $('gold').value,
+      }),
+    }).then(r => r.json());
+    if (!sub.ok) throw new Error(sub.error || 'submit failed');
+    const rep = await pollUntilDone('Score');
+    if (rep.ok === false) throw new Error(rep.message || rep.error || 'score failed');
+    renderScore(rep);
+    $('status').textContent = 'Score done';
+  } catch (e) {
+    $('status').innerHTML = `<span class="bad">${esc(e.message || e)}</span>`;
+  } finally {
+    setBusy(false);
+  }
+};
+
+$('btn-pair').onclick = async () => {
+  const temporal = $('temporal').value.trim();
+  const contra = $('contra').value.trim();
+  if (!temporal || !contra) {
+    $('status').innerHTML = '<span class="bad">Need both temporal and contra notes</span>';
+    return;
+  }
+  setBusy(true);
+  $('status').textContent = 'Custom pair queued… (two HF captures)';
+  try {
+    const sub = await fetch('/api/pair', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ temporal, contra }),
+    }).then(r => r.json());
+    if (!sub.ok) throw new Error(sub.error || 'submit failed');
+    const rep = await pollUntilDone('Pair');
+    if (rep.ok === false) throw new Error(rep.message || rep.error || 'pair failed');
+    renderPair(rep);
+    $('status').textContent = 'Custom pair done';
+  } catch (e) {
+    $('status').innerHTML = `<span class="bad">${esc(e.message || e)}</span>`;
+  } finally {
+    setBusy(false);
+  }
+};
+
+$('btn-frozen').onclick = async () => {
+  setBusy(true);
+  $('status').textContent = 'Loading frozen artifacts…';
+  try {
+    const rep = await fetch('/api/frozen').then(r => r.json());
+    if (rep.error) throw new Error(rep.error);
+    renderFrozen(rep);
+    $('status').textContent = 'Frozen replay loaded';
+  } catch (e) {
+    $('status').innerHTML = `<span class="bad">${esc(e.message || e)}</span>`;
+  } finally {
+    setBusy(false);
+  }
+};
+
+async function init() {
+  meta = await fetch('/api/meta').then(r => r.json());
+  $('examples').innerHTML = (meta.examples || []).map(ex =>
+    `<button type="button" data-id="${esc(ex.id)}"><b>${esc(ex.id)}</b> · ${esc(ex.role)} — load into Clinical note</button>`
+  ).join('');
+  $('examples').querySelectorAll('button').forEach(btn => {
+    btn.onclick = () => {
+      const ex = meta.examples.find(e => e.id === btn.dataset.id);
+      if (!ex) return;
+      $('note').value = ex.evidence;
+      $('gold').value = ex.gold || 'UNKNOWN';
+      $('case_id').value = ex.id;
+      if (ex.role === 'temporal') $('temporal').value = ex.evidence;
+      if (ex.role === 'contra') $('contra').value = ex.evidence;
+    };
+  });
+  const dirs = meta.directions_cached ? 'directions cached' : 'directions will bake on first Score';
+  $('status').textContent = `port ${meta.port} · ${dirs} · ${meta.capabilities?.note || ''}`;
+}
+init().catch(e => { $('status').textContent = 'Error: ' + e; });
+</script>
+</body>
+</html>
