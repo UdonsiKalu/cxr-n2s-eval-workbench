@@ -22,15 +22,20 @@ You do **not** need to already know mechanistic interpretability (MI) or Represe
 **One sentence version of the project:**  
 We paste a doctor's note, ask a model whether "first-line therapy failed," then optionally look *inside* the model, nudge a frozen direction, and (when needed) decompose that direction into sparse features — while Track A keeps AUTO vs REVIEW auditable.
 
-**Scope of this tour:** the **downstream** path (utilization / generation) plus the **neural→symbolic boundary** (Track A Dual / gates). Upstream prefill (U0/U1) was run in the lab — cue ±α·v did **not** flip commit X; UI still exposes only the four downstream buttons.
+**Scope of this tour:** the **downstream** path (utilization / generation) plus the **neural→symbolic boundary** (Track A Dual / gates).  
+
+**Upstream** (formation map, U-A/U-B, live Score on **:8258**) has its own complete write-up:  
+`docs/N2S-Upstream-Workbench-Tour.md` / `.pdf` — including a full decode of `d = unit(μ_T − μ_C)`.
+
+**One-page claim freeze:** lab `docs/N2S-SYSTEM-CLAIM.md` · closeout `TRACKB-DOWNSTREAM-CLOSEOUT.md` · upstream portfolio `TRACKB-UPSTREAM-PORTFOLIO.md` · Track A `TRACKA-TEMPORAL-FAMILY-FREEZE.md` · circuit `TRACKB-CIRCUIT-C01-FREEZE.md`.
 
 ## System characterization (three pieces)
 
 ```text
 Doctor's note
-      ↓  UPSTREAM — formation / evolution of representations (lab U0/U1)
+      ↓  UPSTREAM — formation / evolution of representations (:8258 + lab)
 Tokenization → layer-wise compute → internal reps
-      ↓  DOWNSTREAM — utilization → structured LLM output (this tour)
+      ↓  DOWNSTREAM — utilization → structured LLM output (this tour · :8257)
 Generation / commit (e.g. contradiction.present)
 ════════════════════════════
    NEURAL → SYMBOLIC BOUNDARY  (hard cut · Track A)
@@ -39,8 +44,6 @@ CXR atoms / Dual / gates → AUTO | REVIEW
 ```
 
 Upstream vs downstream is an **experimental partition** (formation → utilization), not a hard layer line inside the transformer. The only hard cut is neural → symbolic.
-
-**One-page claim freeze:** lab `docs/N2S-SYSTEM-CLAIM.md` · closeout `TRACKB-DOWNSTREAM-CLOSEOUT.md` · upstream `TRACKB-UPSTREAM-PREFILL.md` · Track A `TRACKA-TEMPORAL-FAMILY-FREEZE.md`.
 
 \newpage
 
@@ -65,11 +68,10 @@ In our workbench we take **small, causal steps** into MI on HF **Qwen 2.5 7B**:
 - Read **activations** (hidden vectors) at selected **layers** (Deep dive).  
 - Ask whether **L20** looks more like a **temporal-change** or **contradiction** pattern.  
 - **Steer** L20 with a frozen direction **v** (Intervene α).  
-- **Decompose** **v** with a published L20 **SAE** and steer top-k features (SAE features).
+- **Decompose** **v** with a published L20 **SAE** and steer top-k features (SAE features).  
+- **Circuit ladder (lab CLI):** who writes along **v** at commit (C0) → patch L20 MLP (C1) → path restrict (C2). Soft gates frozen — see Phase 5.
 
 **Stack:** Hugging Face `transformers` + PyTorch **forward hooks** (callbacks on a layer’s output). We do **not** rewrite the model into TransformerLens for this workbench.
-
-We are **not** yet claiming per-head circuits or English feature labels. Circuit write-audit scaffolding exists in the lab; it is not a workbench button.
 
 ## What is RepEng?
 
@@ -81,14 +83,22 @@ Our write step is simple:
 
 **h ← h + alpha · v**
 
-- **h** — the hidden state at L20 on the token where the model decides `contradiction.present`  
-- **v** — a frozen unit direction built as `unit(mean(Class A) − mean(Class B))`  
-- **alpha** — how hard we push (frozen claim uses **alpha = 8**)
+### Glossary — how to read `v = unit(μ_A − μ_B)`
 
-**Class A** = gold SATISFIED temporal-change notes where the model already said X=false.  
-**Class B** = gold CONTRADICTION notes where the model said X=true.
+| Symbol | Plain English |
+|--------|----------------|
+| **Class A** | Gold SATISFIED temporal-change notes where HF already said X=false (expand fit) |
+| **Class B** | Gold CONTRADICTION notes where HF said X=true |
+| **μ_A / μ_B** | Mean **commit-token** residual at L20 over those classes |
+| **μ_A − μ_B** | Difference pointing toward “more A / less B” geometry |
+| **unit(·)** | Normalize to length 1 — direction only |
+| **v** | Frozen expand direction used by Intervene / SAE / circuit |
+| **α (alpha)** | How hard we push; frozen claim uses **α = 8** |
+| **h** | Hidden state at L20 on the `contradiction.present` commit token |
 
-So **v** points roughly from "true contradiction geometry" toward "temporal / non-contradiction geometry." Pushing along **v** can clear some **false X** without being a magic family-wide fix.
+So **v** points roughly from “true contradiction geometry” toward “temporal / non-contradiction geometry.” Pushing along **v** can clear some **false X** without being a magic family-wide fix.
+
+**Do not confuse with Upstream `d = unit(μ_T − μ_C)`** (prefill note means @ L24). cos(d, v) ≈ 0.03 — almost orthogonal. Full Upstream decode: `N2S-Upstream-Workbench-Tour.pdf`.
 
 ## Why controls matter
 
@@ -456,6 +466,30 @@ Artifacts: `n2s-sae-pilot-scores.json`, `n2s-sae-pilot-causal*.json`.
 
 \newpage
 
+# Phase 5 — Circuit ladder (lab CLI · frozen)
+
+Not a fifth button on `:8257` yet. After SAE, we asked: **who writes into the residual along v at commit?**
+
+| Step | Name | Result |
+|------|------|--------|
+| **C0** | Write audit @ commit | Top \|Δ(A−B)\| = **L20/mlp/frozen_v** ≈ +6.75 |
+| **C1** | Causal patch L20 MLP | Soft gate **YES** — B←A Δmargin≈−3.1; A←B flips X both |
+| **C2** | Path restrict (L16 vs L20) | **LOCAL_SUFFICIENT** — L16 alone weak; stack ≈ L20 |
+
+**Say:** L20 MLP commit write is a **causal site** (local at this grain).  
+**Do not say:** full temporality circuit / named head.
+
+```bash
+cd cxr-evidence-grounding-lab
+./scripts/run_circuit_pilot.sh audit --max-per-class 2
+./scripts/run_circuit_pilot.sh patch --max-per-class 2
+./scripts/run_circuit_pilot.sh path --max-per-class 2
+```
+
+Freeze: `TRACKB-CIRCUIT-C01-FREEZE.md`. Downstream C0–C2 does **not** reopen Upstream U-C/U-D.
+
+\newpage
+
 # How the four phases fit together
 
 ```
@@ -490,7 +524,7 @@ Doctor's note
 - Prefer `../cxrlabs/faiss_gpu1/bin/python server.py` (not bare system `python3`) for GPU HF phases.  
 - Browser **sessionStorage** keeps the last results across hard-refresh in the same tab.
 
-**Not in this UI yet:** upstream prefill capture / cue-site patch (lab CLI only). U1 on the FOLFOX pair was a **null** result (no commit X flip) — see system claim.
+**Not on `:8257`:** Upstream live Score / Frozen replay / custom pair — use **`:8258`** (complete tour: `N2S-Upstream-Workbench-Tour.pdf`). Lab U1 cue ±α·v was a **null** (no commit X flip).
 
 \newpage
 
@@ -501,9 +535,11 @@ Doctor's note
 | **Track A** | Qwen Dual wrong_AUTO=0 on temporal DEV + sealed TEST; fails → REVIEW | Clinical validation; high AUTO coverage |
 | **Downstream α=8** | Partial L20 expand editor; controls held | Fixes all temporal false-X; α=16/32 freeze |
 | **SAE** | Chanin L20 decompose **v** + top-k steers (pilot) | “Found the temporality neuron” |
-| **Upstream U1** | Prefill cue ±α·v tested; **no** X flip on recipe sites | Upstream editor works like commit α=8 |
+| **Circuit C0–C2** | L20 MLP causal **site**; C2 local-sufficient | Full circuit / temporality neuron |
+| **Upstream** | Formation **d** @ L24; gen YES; ablate + α·d **null**; `:8258` Score correlational | Upstream editor; U-C/U-D from nulls |
 
-Full freeze text: `cxr-evidence-grounding-lab/docs/N2S-SYSTEM-CLAIM.md`.
+Full freeze text: `cxr-evidence-grounding-lab/docs/N2S-SYSTEM-CLAIM.md`.  
+Upstream complete tour (including `d = unit(μ_T−μ_C)` decode): `docs/N2S-Upstream-Workbench-Tour.pdf`.
 
 \newpage
 
@@ -513,14 +549,15 @@ Full freeze text: `cxr-evidence-grounding-lab/docs/N2S-SYSTEM-CLAIM.md`.
 |------|----------------|
 | **Track A** | Reliability path: extract, ground, Dual, AUTO/REVIEW |
 | **Track B / MI / RepEng** | Look inside / steer open-weight models |
+| **Upstream** | How note reps **form** in prefill; map **d** @ L24; Score on `:8258`; ablate/α·d null |
 | **Downstream (this tour)** | How internal reps are **used** for generation / structured output |
-| **Upstream (lab U0/U1)** | How note cues **form / evolve** as reps; U1 null on recipe sites |
 | **Boundary** | Neural structured output → CXR symbols / Dual / AUTO|REVIEW |
 | **Dual** | Two formalization paths (C and D) must agree to AUTO |
 | **N2S** | Neural extract → symbolic grounding |
 | **X** | Contradiction flag (`contradiction.present`) |
-| **L20** | Layer 20 of HF 7B (probe + steer + SAE site) |
-| **v** | Frozen unit direction mean(A)−mean(B) |
+| **L20 / L24** | Layer indices (Downstream steer/SAE @ L20; Upstream map peak @ L24) |
+| **v** | `unit(μ_A − μ_B)` — Downstream commit editor direction |
+| **d** | `unit(μ_T − μ_C)` — Upstream formation direction (see Upstream tour) |
 | **alpha** | Steer strength along v (freeze = 8) |
 | **N2S mismatch** | Neural X true, grounded X false → REVIEW |
 | **HF hooks** | PyTorch `register_forward_hook` on HF layers — read/modify activations |
@@ -543,13 +580,18 @@ Full freeze text: `cxr-evidence-grounding-lab/docs/N2S-SYSTEM-CLAIM.md`.
 | alpha=8 freeze note | `cxr-evidence-grounding-lab/docs/TRACKB-ALPHA8-FREEZE.md` |
 | SAE pilot note | `cxr-evidence-grounding-lab/docs/TRACKB-SAE-PILOT.md` |
 | System claim (one-pager) | `cxr-evidence-grounding-lab/docs/N2S-SYSTEM-CLAIM.md` |
+| Upstream complete tour | `docs/N2S-Upstream-Workbench-Tour.md` / `.pdf` (:8258) |
+| Upstream server | `upstream_server.py` · `upstream_api.py` · `static/upstream.html` |
+| Circuit freeze | `cxr-evidence-grounding-lab/docs/TRACKB-CIRCUIT-C01-FREEZE.md` |
+| Upstream portfolio | `cxr-evidence-grounding-lab/docs/TRACKB-UPSTREAM-PORTFOLIO.md` |
 | Upstream prefill | `cxr-evidence-grounding-lab/docs/TRACKB-UPSTREAM-PREFILL.md` |
 | Track A temporal freeze | `cxr-evidence-grounding-lab/docs/TRACKA-TEMPORAL-FAMILY-FREEZE.md` |
 | DEV fixtures | `data/temporal-family-dev.json`, `temporal-family-dev-expand.json` |
 
 Do **not** fit on sealed `temporal-family-test.json`.
 
-Rebuild this PDF: `./build-newcomer-tour-pdf.sh` → `docs/N2S-Workbench-Newcomer-Tour.pdf`.
+Rebuild this PDF: `./build-newcomer-tour-pdf.sh` → `docs/N2S-Workbench-Newcomer-Tour.pdf`.  
+Rebuild Upstream PDF: `./build-upstream-tour-pdf.sh` → `docs/N2S-Upstream-Workbench-Tour.pdf`.
 
 \newpage
 
@@ -558,8 +600,10 @@ Rebuild this PDF: `./build-newcomer-tour-pdf.sh` → `docs/N2S-Workbench-Newcome
 1. **Evaluate** decides AUTO vs REVIEW for the clinical predicate using extract → ground → Dual → gates (**boundary**).  
 2. **Deep dive** shows an L20 temporal-vs-contradiction readout (observe only — **downstream**).  
 3. **Intervene α=8** tests a limited RepEng editor with controls — clears some false X, spares true contradictions (**downstream**).  
-4. **SAE features** decomposes the same **v** into Chanin L20 sparse features and runs top-k causal steers — ranking is not a labeled “temporality neuron” (**downstream**).
+4. **SAE features** decomposes the same **v** into Chanin L20 sparse features and runs top-k causal steers — ranking is not a labeled “temporality neuron” (**downstream**).  
+5. **Circuit C0–C2** (lab): L20 MLP is a causal **site** along **v**; locally sufficient — not a full circuit.  
+6. **Upstream** (`:8258` tour): formation **d** @ L24 generalizes and Scores notes; ablate + α·d are **null** — keep **d** and **v** separate.
 
-**Frozen story:** Track A temporal family wrong_AUTO=0 (DEV+test). Downstream α=8 partial editor + SAE pilot. Upstream U1 null at recipe cue sites — formation ≠ automatic commit editor.
+**Frozen story:** Track A wrong_AUTO=0 (DEV+test). Downstream α=8 partial editor + SAE pilot + L20 MLP site. Upstream map+gen YES / causal nulls — formation ≠ automatic commit editor.
 
-Theory in one breath: concepts can live as directions in activation space; we **read** L20 (Deep dive), **write** along a frozen **v** at commit (Intervene), optionally **sparse-decompose** that write (SAE), and keep clinical decisions auditable at the symbolic boundary — while honest nulls upstream stay null.
+Theory in one breath: concepts can live as directions in activation space; we **read** L20 (Deep dive), **write** along a frozen **v** at commit (Intervene), optionally **sparse-decompose** that write (SAE), locate a commit **MLP site** (C0–C2), and keep clinical decisions auditable at the symbolic boundary — while Upstream **d** stays a correlational formation map with honest nulls on causal tests.

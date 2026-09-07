@@ -26,7 +26,8 @@ python3 walk_n2s.py tour --through W04
 Lessons live in `walkthrough/`. Build PDFs:
 
 - `./build-walkthrough-pdf.sh` → `docs/N2S-CLI-Walkthrough.pdf`
-- `./build-newcomer-tour-pdf.sh` → `docs/N2S-Workbench-Newcomer-Tour.pdf` (theory + screenshots; includes SAE)
+- `./build-newcomer-tour-pdf.sh` → `docs/N2S-Workbench-Newcomer-Tour.pdf` (Downstream :8257 theory + screenshots; includes SAE)
+- `./build-upstream-tour-pdf.sh` → `docs/N2S-Upstream-Workbench-Tour.pdf` (Upstream :8258 background + UI + code sketches)
 
 ## Flow
 
